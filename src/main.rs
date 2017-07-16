@@ -25,7 +25,7 @@ fn random_response() -> &'static str {
     RESPONSES[index]
 }
 
-fn respond(target: &str, msg: &str, src: Option<&str>) -> Option<Cow<'static, str>> {
+fn respond(src: &str, dst: &str, msg: &str) -> Option<Cow<'static, str>> {
     /*
     if target == USERNAME {
         Some(Cow::Borrowed(random_response()))
@@ -45,17 +45,22 @@ fn respond(target: &str, msg: &str, src: Option<&str>) -> Option<Cow<'static, st
     }
     */
     let resp = random_response();
-    match (target, msg.find(USERNAME), src) {
+    println!("New message: FROM '{}', TO '{}', MSG: '{}'", src, dst, msg);
+    match (src, dst, msg.find(USERNAME)) {
+        // don't respond to our own messgae
+        (USERNAME, _, _) => None,
         // PM from someone
-        (USERNAME, _, _) => Some(Cow::Borrowed(resp)),
+        (_, USERNAME, _) => Some(Cow::Borrowed(resp)),
         // message started with USERNAME
-        (_, Some(0), Some(s)) => Some(Cow::Owned(format!("{}: {}", s, resp))),
+        (_, chan, Some(0)) if CHANNELS.contains(&chan) => 
+            Some(Cow::Owned(format!("{}: {}", src, resp))),
         // message sorta started with USERNAME: ' /USERNAME' or something
-        (_, Some(i), Some(s)) if i<3 && 
+        (_, chan, Some(i)) if i<3 && CHANNELS.contains(&chan) &&
                 msg.trim_left().starts_with(|c| c=='/'||c=='\\') => 
-            Some(Cow::Owned(format!("{}: {}", s, resp))),
+            Some(Cow::Owned(format!("{}: {}", src, resp))),
         // someone said my name
-        (_, Some(_), _) => Some(Cow::Borrowed(resp)),
+        (_, chan, Some(_)) if CHANNELS.contains(&chan) => 
+            Some(Cow::Borrowed(resp)),
         _ => None,
     }
 }
@@ -65,13 +70,17 @@ fn run(cfg: Config) -> Result<(),irc::error::Error> {
     server.identify()?;
 
     server.for_each_incoming(|message| { 
-        println!("{:?}", message);
-        if let Command::PRIVMSG(ref target, ref msg) = message.command {
-            if let Some(resp) = respond(target, msg, message.source_nickname()) {
-                match server.send_privmsg(target, &resp) {
-                    Err(e) => println!("Failed to respond: {:?}", e),
-                    _ => {},
-                };
+        //println!("SAW:  `{:?}`", message);
+        //if let (Command::PRIVMSG(ref target, ref msg), Some(src)) = (message.command, message.source_nickname()) {
+        if let Command::PRIVMSG(ref dst, ref msg) = message.command {
+            if let Some(src) = message.source_nickname() {
+                if let Some(resp) = respond(src, dst, msg) {
+                    println!("SENT: `{:?}`  in response to `{:?}`", resp, message);
+                    match server.send_privmsg(dst, &resp) {
+                        Err(e) => println!("Failed to respond: {:?}", e),
+                        _ => {},
+                    };
+                }
             }
         }
     })
