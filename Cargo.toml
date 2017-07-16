@@ -1,0 +1,9 @@
+[package]
+name = "slackrbot"
+version = "0.1.0"
+authors = ["owen <owen@oms.sh>"]
+
+[dependencies]
+irc = "0.12.3"
+rand = "0.3.15"
+
