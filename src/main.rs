@@ -2,7 +2,6 @@
 extern crate irc;
 extern crate rand;
 
-use std::borrow::Cow;
 use std::default::Default;
 use irc::client::prelude::*;
 
@@ -15,54 +14,33 @@ const RESPONSES: &'static [&'static str] = &[
     "fuck off",
     "do it yourself",
     "you're not my supervisor",
-    "/me rolls over and goes back to sleep",
-    "/me laughs",
+    "\u{1}ACTION rolls over and goes back to sleep\u{1}",
+    "\u{1}ACTION laughs\u{1}",
 ];
 
 
 fn random_response() -> &'static str {
+    // TODO: special responses (e.g. format!("{}: {}", src, msg))
     let index = rand::random::<usize>() % RESPONSES.len();
     RESPONSES[index]
 }
 
-fn respond(src: &str, dst: &str, msg: &str) -> Option<Cow<'static, str>> {
-    /*
-    if target == USERNAME {
-        Some(Cow::Borrowed(random_response()))
-    } else if msg.contains(USERNAME) {
-        let resp = random_response();
-        if let Some(src_nick) = src {
-            if msg.starts_with(USERNAME) {
-                Some(Cow::Owned(format!("{}: {}", src_nick, resp)))
-            } else {
-                Some(Cow::Borrowed(resp))
-            }
-        } else {
-            Some(Cow::Borrowed(resp))
-        }
-    } else {
-        None
-    }
-    */
-    let resp = random_response();
-    println!("New message: FROM '{}', TO '{}', MSG: '{}'", src, dst, msg);
-    match (src, dst, msg.find(USERNAME)) {
-        // don't respond to our own messgae
-        (USERNAME, _, _) => None,
-        // PM from someone
-        (_, USERNAME, _) => Some(Cow::Borrowed(resp)),
-        // message started with USERNAME
-        (_, chan, Some(0)) if CHANNELS.contains(&chan) => 
-            Some(Cow::Owned(format!("{}: {}", src, resp))),
-        // message sorta started with USERNAME: ' /USERNAME' or something
-        (_, chan, Some(i)) if i<3 && CHANNELS.contains(&chan) &&
-                msg.trim_left().starts_with(|c| c=='/'||c=='\\') => 
-            Some(Cow::Owned(format!("{}: {}", src, resp))),
-        // someone said my name
-        (_, chan, Some(_)) if CHANNELS.contains(&chan) => 
-            Some(Cow::Borrowed(resp)),
+fn respond<'a>(src: Option<&'a str>, dst: &'a str, msg: &str) 
+        -> Option<(&'a str, &'static str)> {
+    // `src` is always the person who spoke
+    // `dst` can be 'slackbot' or '#test'
+    println!("SHOULD I RESPOND TO  '{:?}'  WHO SAID  '{}'  TO '{}'", src, msg, dst);
+    // TODO: caps insensitivity?
+    match (src, dst, msg.contains(USERNAME)) {
+        // don't loop
+        (Some(USERNAME), _, _) => None,
+        // PM
+        (Some(src), USERNAME, _) => Some((src, random_response())), 
+        // mention
+        (_, ref chan, true) if CHANNELS.contains(chan) => Some((dst, random_response())),
         _ => None,
     }
+
 }
 
 fn run(cfg: Config) -> Result<(),irc::error::Error> { 
@@ -70,17 +48,13 @@ fn run(cfg: Config) -> Result<(),irc::error::Error> {
     server.identify()?;
 
     server.for_each_incoming(|message| { 
-        //println!("SAW:  `{:?}`", message);
-        //if let (Command::PRIVMSG(ref target, ref msg), Some(src)) = (message.command, message.source_nickname()) {
-        if let Command::PRIVMSG(ref dst, ref msg) = message.command {
-            if let Some(src) = message.source_nickname() {
-                if let Some(resp) = respond(src, dst, msg) {
-                    println!("SENT: `{:?}`  in response to `{:?}`", resp, message);
-                    match server.send_privmsg(dst, &resp) {
-                        Err(e) => println!("Failed to respond: {:?}", e),
-                        _ => {},
-                    };
-                }
+        if let Command::PRIVMSG(ref target, ref msg) = message.command {
+            if let Some((recip, resp)) = respond(message.source_nickname(), target, msg) {
+                println!("SENT: `{}` to `{}` in response to `{:?}`", resp, recip, message);
+                match server.send_privmsg(recip, resp) {
+                    Err(e) => println!("Failed to respond: {:?}", e),
+                    _ => {},
+                };
             }
         }
     })
